@@ -47,7 +47,7 @@ func pt2(input string) int {
 	doub := false
 	nice := 0
 	for _, s := range str {
-		for i, _ := range s {
+		for i := range s {
 			for j := i + 2; j < len(s)-1; j++ {
 				if s[i] == s[j] && s[i+1] == s[j+1] {
 					doub = true
