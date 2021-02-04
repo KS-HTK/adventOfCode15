@@ -23,8 +23,6 @@ func main() {
 	fmt.Printf("Part 2: %d\n", pt2(string(dat)))
 }
 
-var m map[string]int
-
 func pt1(input string) int {
 	for i := 1; true; i++ {
 		hash := getMD5Hash(input, i)
