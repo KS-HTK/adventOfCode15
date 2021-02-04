@@ -44,22 +44,32 @@ func pt1(input string) int {
 func pt2(input string) int {
 	str := strings.Split(input, "\n")
 	drep := `a.a|b.b|c.c|d.d|e.e|f.f|g.g|h.h|i.i|j.j|k.k|l.l|m.m|n.n|o.o|p.p|q.q|r.r|s.s|t.t|u.u|v.v|w.w|x.x|y.y|z.z`
-	doub := false
 	nice := 0
 	for _, s := range str {
-		for i := range s {
-			for j := i + 2; j < len(s)-1; j++ {
-				if s[i] == s[j] && s[i+1] == s[j+1] {
-					doub = true
-				}
-			}
-		}
 		drepe, err := regexp.Match(drep, []byte(s))
+		doub := false
 		errchk(err)
-		if !doub || !drepe {
+		if !drepe {
 			continue
 		}
-		nice++
+		for i := range s {
+			for j := i + 2; j < len(s)-1; j++ {
+				if s[i] == s[j] {
+					if s[i+1] == s[j+1] {
+						doub = true
+					}
+				}
+				if doub {
+					break
+				}
+			}
+			if doub {
+				break
+			}
+		}
+		if doub {
+			nice++
+		}
 	}
 	return nice
 }
