@@ -57,18 +57,14 @@ func pt2(input string) int {
 				if s[i] == s[j] {
 					if s[i+1] == s[j+1] {
 						doub = true
+						nice++
+						break
 					}
-				}
-				if doub {
-					break
 				}
 			}
 			if doub {
 				break
 			}
-		}
-		if doub {
-			nice++
 		}
 	}
 	return nice
