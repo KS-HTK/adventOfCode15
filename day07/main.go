@@ -7,74 +7,25 @@ import (
 	"strings"
 )
 
-//wire
-//	source:
-//		constant
-//		wire
-//		gate
-//	destinations:
-//		list of wires and gates
-// Wire: value or source (one of both has to be known)
-type wire struct {
-	value  uint16
-	known  bool //true if value = signal
-	source gate
-}
-
-//gates
+//commands
 //	inputs
-//	type (oppcode)
-//		0 := & AND
+//	opperation
+//		0 := & AND (constants are stored as true AND value)
 //		1 := | OR
-//		2 := ^ XOR (NOT := 1111 ^ x)
+//		2 := ^ XOR (NOT is stored as true XOR value)
 //		3 := >> LSHIFT
 //		4 := << RSHIFT
-//	destinations
-// Gate: 'inA', 'inB' and a oppcode 'opp'
-type gate struct {
-	inA string
-	inB string
-	opp string
-}
-
-//I know this is getting a little clutterd and overly complex (but learning...)
-//stack for keeping a todo stack.
-type stack []string
-
-// IsEmpty: check if stack is empty
-func (s *stack) IsEmpty() bool {
-	return len(*s) == 0
-}
-
-// Pop: Remove and return top element of stack. Return false if empty
-func (s *stack) Pop() (string, bool) {
-	if s.IsEmpty() {
-		return "", false
-	} else {
-		index := len(*s) - 1
-		elem := (*s)[index]
-		*s = (*s)[:index]
-		return elem, true
-	}
-}
-
-// Push: add a new value onto the stack
-func (s *stack) Push(str string) {
-	*s = append(*s, str)
-}
-
-// Peek: look at top value (not removing it)
-func (s *stack) Peek() (string, bool) {
-	if s.IsEmpty() {
-		return "", false
-	} else {
-		return (*s)[len(*s)-1], true
-	}
+// Command: 'input A', 'input B' and a 'opperation'
+type cmd struct {
+	inA  string
+	inB  string
+	opp  string
+	name string
 }
 
 //Stacks did'nt work... Lets try Queues.
 //Well, the Stack works fine, my Solution useing Stacks is the Problem.
-type queue []string
+type queue []cmd
 
 // IsEmpty: returns true if queue is empty.
 func (q *queue) IsEmpty() bool {
@@ -82,14 +33,14 @@ func (q *queue) IsEmpty() bool {
 }
 
 //Push: add a new value to the end of the queue
-func (q *queue) Push(str string) {
-	*q = append(*q, str)
+func (q *queue) Push(com cmd) {
+	*q = append(*q, com)
 }
 
 //Pop: remove and return first element of queue
-func (q *queue) Pop() (string, bool) {
+func (q *queue) Pop() (cmd, bool) {
 	if q.IsEmpty() {
-		return "", false
+		return cmd{}, false
 	}
 	elem := (*q)[0]
 	*q = (*q)[1:]
@@ -102,18 +53,23 @@ func errchk(e error) {
 	}
 }
 
-//check if a string is a constant
+//check if a string is a number
 func isNumeric(s string) bool {
 	_, err := strconv.ParseInt(s, 10, 16)
 	return err == nil
 }
 
-//store all wires nicely on the map, referenced by their name
-var diagram map[string]wire
+//store all wire-values nicely on the map, referenced by their name
+var diagram map[string]uint16
+
+//queue of all unsolved commands
+var todo queue
 
 func main() {
-	diagram := make(map[string]wire)
-	diagram["true"] = wire{value: 65535, known: true}
+	diagram = make(map[string]uint16)
+	diagram["true"] = 65535
+
+	//read input file
 	dat, err := ioutil.ReadFile("input")
 	errchk(err)
 	//seperate lines
@@ -130,81 +86,79 @@ func main() {
 		//if input has only one part (wire or constant)
 		if len(tmp) == 1 {
 			if isNumeric(tmp[0]) {
+				//input is constant
 				val, _ := strconv.ParseInt(tmp[0], 10, 16)
-				diagram[out] = wire{value: uint16(val), known: true}
+				diagram[out] = uint16(val)
 			} else {
-				//wire (maxINT AND x = x)
-				diagram[out] = wire{known: false, source: gate{inA: "true", inB: tmp[0], opp: "AND"}}
+				//input is wire
+				//wire (true AND val = val)
+				todo.Push(cmd{inA: "true", inB: tmp[0], opp: "AND", name: out})
 			}
 		} else if len(tmp) == 2 {
-			//if input is NOT
-			diagram[out] = wire{known: false, source: gate{inA: "true", inB: tmp[1], opp: "XOR"}}
+			//input is NOT
+			//true XOR val = NOT val
+			todo.Push(cmd{inA: "true", inB: tmp[1], opp: "XOR", name: out})
 		} else if len(tmp) == 3 {
 			//if input is any other opperation
-			diagram[out] = wire{known: false, source: gate{inA: tmp[0], inB: tmp[2], opp: tmp[1]}}
+			todo.Push(cmd{inA: tmp[0], inB: tmp[2], opp: tmp[1], name: out})
 
 		}
-
 	}
+	solve()
 	fmt.Printf("Part 1: %d\n", pt1())
 	fmt.Printf("Part 2: %d\n", pt2())
 }
 
-func pt1() uint16 {
-	if diagram["a"].known {
-		return diagram["a"].value
-	}
-	var todo stack
-	todo.Push("a")
+func solve() {
 	for !todo.IsEmpty() {
-		top, _ := todo.Peek()
-		src := diagram[top].source
-		if !isNumeric(src.inA) || !diagram[src.inA].known {
-			todo.Push(src.inA)
-			continue
+		//queue should not be empty.
+		c, _ := todo.Pop()
+		if !assign(c) {
+			todo.Push(c)
 		}
-		if !isNumeric(src.inB) || !diagram[src.inB].known {
-			todo.Push(src.inB)
-			continue
-		}
-		top, _ = todo.Pop()
-		assign(top, src)
 	}
-	fmt.Println(diagram)
-	return diagram["a"].value
 }
 
-func assign(name string, source gate) {
-	obj := diagram[name]
+func assign(src cmd) bool {
 	var aVal, bVal uint16
-	if isNumeric(source.inA) {
-		tmp, err := strconv.ParseInt(source.inA, 10, 16)
+	if isNumeric(src.inA) {
+		tmp, err := strconv.ParseInt(src.inA, 10, 16)
 		errchk(err)
 		aVal = uint16(tmp)
+	} else if val, ok := diagram[src.inA]; ok {
+		aVal = val
 	} else {
-		aVal = diagram[source.inA].value
+		return false
 	}
-	if isNumeric(source.inB) {
-		tmp, err := strconv.ParseInt(source.inB, 10, 16)
+	if isNumeric(src.inB) {
+		tmp, err := strconv.ParseInt(src.inB, 10, 16)
 		errchk(err)
 		bVal = uint16(tmp)
-
+	} else if val, ok := diagram[src.inB]; ok {
+		bVal = val
 	} else {
-		bVal = diagram[source.inB].value
+		return false
 	}
-	switch source.opp {
+	switch src.opp {
 	case "AND":
-		obj.value = aVal & bVal
+		diagram[src.name] = aVal & bVal
 	case "OR":
-		obj.value = aVal | bVal
+		diagram[src.name] = aVal | bVal
 	case "XOR":
-		obj.value = aVal ^ bVal
+		diagram[src.name] = aVal ^ bVal
 	case "LSHIFT":
-		obj.value = aVal >> bVal
+		diagram[src.name] = aVal << bVal
 	case "RSHIFT":
-		obj.value = aVal << bVal
+		diagram[src.name] = aVal >> bVal
 	}
-	obj.known = true
+	return true
+}
+
+func pt1() uint16 {
+	if val, ok := diagram["a"]; ok {
+		return val
+	}
+	return 0
 }
 
 func pt2() int {
