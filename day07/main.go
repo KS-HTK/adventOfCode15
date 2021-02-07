@@ -47,6 +47,14 @@ func (q *queue) Pop() (cmd, bool) {
 	return elem, true
 }
 
+//Peek: return first element of queue
+func (q *queue) Peek() (cmd, bool) {
+	if q.IsEmpty() {
+		return cmd{}, false
+	}
+	return (*q)[0], true
+}
+
 func errchk(e error) {
 	if e != nil {
 		panic(e)
@@ -55,7 +63,7 @@ func errchk(e error) {
 
 //check if a string is a number
 func isNumeric(s string) bool {
-	_, err := strconv.ParseInt(s, 10, 16)
+	_, err := strconv.ParseInt(s, 0, 32)
 	return err == nil
 }
 
@@ -66,14 +74,25 @@ var diagram map[string]uint16
 var todo queue
 
 func main() {
-	diagram = make(map[string]uint16)
-	diagram["true"] = 65535
-
 	//read input file
 	dat, err := ioutil.ReadFile("input")
 	errchk(err)
+	initial(string(dat))
+	solve()
+	res := getA()
+	fmt.Printf("Part 1: %d\n", res)
+	initial(string(dat))
+	diagram["b"] = res
+	solve()
+	fmt.Printf("Part 2: %d\n", getA())
+}
+
+func initial(dat string) {
+	diagram = make(map[string]uint16)
+	diagram["true"] = 0b1111111111111111
+
 	//seperate lines
-	commands := strings.Split(string(dat), "\n")
+	commands := strings.Split(dat, "\n")
 	for _, s := range commands {
 		if s == "" {
 			continue
@@ -87,7 +106,7 @@ func main() {
 		if len(tmp) == 1 {
 			if isNumeric(tmp[0]) {
 				//input is constant
-				val, _ := strconv.ParseInt(tmp[0], 10, 16)
+				val, _ := strconv.ParseInt(tmp[0], 10, 32)
 				diagram[out] = uint16(val)
 			} else {
 				//input is wire
@@ -104,9 +123,6 @@ func main() {
 
 		}
 	}
-	solve()
-	fmt.Printf("Part 1: %d\n", pt1())
-	fmt.Printf("Part 2: %d\n", pt2())
 }
 
 func solve() {
@@ -122,7 +138,7 @@ func solve() {
 func assign(src cmd) bool {
 	var aVal, bVal uint16
 	if isNumeric(src.inA) {
-		tmp, err := strconv.ParseInt(src.inA, 10, 16)
+		tmp, err := strconv.ParseInt(src.inA, 10, 32)
 		errchk(err)
 		aVal = uint16(tmp)
 	} else if val, ok := diagram[src.inA]; ok {
@@ -131,7 +147,7 @@ func assign(src cmd) bool {
 		return false
 	}
 	if isNumeric(src.inB) {
-		tmp, err := strconv.ParseInt(src.inB, 10, 16)
+		tmp, err := strconv.ParseInt(src.inB, 10, 32)
 		errchk(err)
 		bVal = uint16(tmp)
 	} else if val, ok := diagram[src.inB]; ok {
@@ -154,13 +170,9 @@ func assign(src cmd) bool {
 	return true
 }
 
-func pt1() uint16 {
+func getA() uint16 {
 	if val, ok := diagram["a"]; ok {
 		return val
 	}
 	return 0
-}
-
-func pt2() int {
-	return -1
 }
