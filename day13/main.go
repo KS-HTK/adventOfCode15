@@ -17,25 +17,24 @@ func errchk(e error) {
 	}
 }
 
-var dataMap map[string](map[string]int)
-
-func interpret(lines []string) {
-	dataMap = make(map[string]map[string]int)
+func interpret(lines []string) map[string]map[string]int {
+	data := make(map[string]map[string]int)
 	for _, line := range lines {
 		if line == "" {
 			continue
 		}
 		words := strings.Split(line, " ")
-		if dataMap[words[0]] == nil {
-			dataMap[words[0]] = make(map[string]int)
+		if data[words[0]] == nil {
+			data[words[0]] = make(map[string]int)
 		}
 		val, err := strconv.Atoi(words[3])
 		errchk(err)
 		if words[2] == "lose" {
 			val = -val
 		}
-		dataMap[words[0]][words[len(words)-1]] = val
+		data[words[0]][words[len(words)-1]] = val
 	}
+	return data
 }
 
 func keys(in map[string]map[string]int) []string {
@@ -102,19 +101,26 @@ func main() {
 	dat, err := ioutil.ReadFile("input")
 	errchk(err)
 	lines := strings.Split(string(dat), ".\n")
-	interpret(lines)
-	res1, res2 := make(chan int), make(chan int)
-	go findMaxHappieness(res1, dataMap)
-	dataMap2 := make(map[string]map[string]int)
+	var dataMap, dataMap2 map[string]map[string]int
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		dataMap = interpret(lines)
+		wg.Done()
+	}()
+	go func() {
+		dataMap2 = interpret(lines)
+		wg.Done()
+	}()
+	wg.Wait()
 	dataMap2["me"] = make(map[string]int)
-	for k, v := range dataMap {
-		dataMap2[k] = make(map[string]int)
-		for key, val := range v {
-			dataMap2[k][key] = val
-		}
+	for k, _ := range dataMap {
 		dataMap2[k]["me"] = 0
 		dataMap2["me"][k] = 0
 	}
+
+	res1, res2 := make(chan int), make(chan int)
+	go findMaxHappieness(res1, dataMap)
 	go findMaxHappieness(res2, dataMap2)
 
 	fmt.Printf("Part 1: %d\n", <-res1)
