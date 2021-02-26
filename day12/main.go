@@ -13,20 +13,7 @@ func errchk(e error) {
 	}
 }
 
-func main() {
-	dat, err := ioutil.ReadFile("input")
-	errchk(err)
-	nums := getnums(string(dat))
-	sumall := sum(nums)
-	fmt.Printf("Part 1: %d\n", sumall)
-	fmt.Printf("Part 2: %d\n", sumall-sumred(0, len(dat), dat))
-}
-
-func getnums(in string) []string {
-	re := regexp.MustCompile("-?[0-9]+")
-	return re.FindAllString(in, -1)
-}
-
+//sums all numbers in a list of string numbers
 func sum(slc []string) int {
 	acc := 0
 	for _, n := range slc {
@@ -37,53 +24,88 @@ func sum(slc []string) int {
 	return acc
 }
 
-var open = []byte("{")[0]
-var close = []byte("}")[0]
-var sqopen = []byte("[")[0]
-var sqclose = []byte("]")[0]
-var red = []byte("red")
+//returns all numbers in a string as slice of string
+func getnums(in string) []string {
+	re := regexp.MustCompile("-?[0-9]+")
+	return re.FindAllString(in, -1)
+}
 
-func sumred(start int, end int, dat []byte) int {
-	first := -1
-	for i := start; i < end; i++ {
-		if dat[i] == open {
-			first = i
-			break
-		}
+func main() {
+	dat, err := ioutil.ReadFile("input")
+	errchk(err)
+	nums := getnums(string(dat))
+	sumall := sum(nums)
+	jobs := make(chan string, 100)
+	results := make(chan int, 100)
+	go worker(jobs, results)
+	go worker(jobs, results)
+	go worker(jobs, results)
+	go worker(jobs, results)
+	//define sum of anything to remove as 0
+	redsum := 0
+	//for all recived values add them to redsum
+	for val := range results {
+		redsum += val
 	}
-	//if non found or start > end return 0
-	if first == -1 {
+	fmt.Printf("Part 1: %d\n", sumall)
+	fmt.Printf("Part 2: %d\n", sumall-redsum)
+}
+
+func worker(jobs chan string, results chan<- int) {
+	for jobstr := range jobs {
+		results <- findred(jobstr, jobs)
+	}
+}
+
+var open = []rune("{")[0]
+var close = []rune("}")[0]
+var sqopen = []rune("[")[0]
+var sqclose = []rune("]")[0]
+var red = []rune("red")
+
+func findred(dat string, jobs chan<- string) int {
+	if len(dat) < 2 {
 		return 0
 	}
+	runeDat := []rune(dat)
+	//find first '{' symbol
+	begin, end := -1, -1
+	//queue for any partial string between '{' and '}'
+	queue := []string{}
 
-	//search the matching closing bracket and look if red is contained
-	last := -1
-	containsRed := false
-	for j := first; j < end; j++ {
-		c := dat[j]
+	for i := 0; i < len(runeDat); i++ {
+		//count the bracket level to make sure that red and the correct closing bracket are only found if no other bracket has been opened.
 		count := 0
-		if c == open || c == sqopen {
+		c := runeDat[i]
+		if count == 0 {
+			if c == open {
+				begin = i
+				count++
+			}
+			if c == sqopen {
+				count++
+			}
+			if c == close {
+				end = i
+				queue = append(queue, string(runeDat[begin+1:end]))
+			}
+			if c == red[0] {
+				if runeDat[i+1] == red[1] && runeDat[i+2] == red[2] {
+					fmt.Println("Code RED!")
+					//if red has been found the number sum is returned
+					return sum(getnums(dat))
+				}
+			}
+		} else if c == open || c == sqopen {
 			count++
 		} else if c == close || c == sqclose {
-			//count can only be 0 if there is a "}" bracket.
-			if count == 0 {
-				last = j
-				break
-			} else {
-				count--
-			}
-		} else if !containsRed && count == 0 && c == red[0] && dat[j+1] == red[1] && dat[j+2] == red[2] {
-			containsRed = true
-			fmt.Println("Code RED!")
+			count--
 		}
 	}
-	if containsRed {
-		//found word red, return -sum of all numbers between first and last
-		part := dat[first+1 : last]
-		nums := getnums(string(part))
-		//return sum + potential same level exclusions
-		return sumred(last+1, end, dat) + sum(nums)
+	fmt.Println("No red found. Adding neu jobs. ")
+	//if no red has been found:
+	for _, s := range queue {
+		jobs <- s
 	}
-	//if no red on this level
-	return sumred(first+1, last, dat) + sumred(last+1, end, dat)
+	return 0
 }
