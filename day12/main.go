@@ -102,7 +102,7 @@ func findred(dat string, jobs chan<- string) int {
 			count--
 		}
 	}
-	fmt.Println("No red found. Adding neu jobs. ")
+	fmt.Println("No red found. Adding new jobs. ")
 	//if no red has been found:
 	for _, s := range queue {
 		jobs <- s
