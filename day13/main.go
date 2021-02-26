@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"modernc.org/mathutil"
 )
@@ -55,26 +56,46 @@ func mod(a int, b int) int {
 	return out
 }
 
-func calcHappieness(names []string) int {
+func calcHappieness(res chan<- int, names []string, data map[string]map[string]int) {
 	score := 0
 	for i, name := range names {
-		score += dataMap[name][names[mod(i-1, len(names))]]
-		score += dataMap[name][names[mod(i+1, len(names))]]
+		score += data[name][names[mod(i-1, len(names))]]
+		score += data[name][names[mod(i+1, len(names))]]
 	}
-	return score
+	res <- score
 }
 
-func findMaxHappieness() int {
-	keySet := sort.StringSlice(keys(dataMap))
+func findMaxHappieness(result chan<- int, data map[string]map[string]int) {
+	keySet := sort.StringSlice(keys(data))
 	mathutil.PermutationFirst(keySet)
-	max, score := 0, 0
-	for mathutil.PermutationNext(keySet) {
-		score = calcHappieness(keySet)
-		if score > max {
-			max = score
+	scores := make(chan int, 100)
+	go func() {
+		max := 0
+		for score := range scores {
+			if score > max {
+				max = score
+			}
 		}
+		result <- max
+		close(result)
+	}()
+	var w sync.WaitGroup
+	for {
+		if !mathutil.PermutationNext(keySet) {
+			break
+		}
+		tmp := make([]string, keySet.Len())
+		for i, v := range keySet {
+			tmp[i] = v
+		}
+		w.Add(1)
+		go func() {
+			calcHappieness(scores, tmp, data)
+			w.Done()
+		}()
 	}
-	return max
+	w.Wait()
+	close(scores)
 }
 
 func main() {
@@ -82,13 +103,20 @@ func main() {
 	errchk(err)
 	lines := strings.Split(string(dat), ".\n")
 	interpret(lines)
-
-	fmt.Printf("Part 1: %d\n", findMaxHappieness())
-	keySet := keys(dataMap)
-	dataMap["me"] = make(map[string]int)
-	for _, name := range keySet {
-		dataMap[name]["me"] = 0
-		dataMap["me"][name] = 0
+	res1, res2 := make(chan int), make(chan int)
+	go findMaxHappieness(res1, dataMap)
+	dataMap2 := make(map[string]map[string]int)
+	dataMap2["me"] = make(map[string]int)
+	for k, v := range dataMap {
+		dataMap2[k] = make(map[string]int)
+		for key, val := range v {
+			dataMap2[k][key] = val
+		}
+		dataMap2[k]["me"] = 0
+		dataMap2["me"][k] = 0
 	}
-	fmt.Printf("Part 2: %d\n", findMaxHappieness())
+	go findMaxHappieness(res2, dataMap2)
+
+	fmt.Printf("Part 1: %d\n", <-res1)
+	fmt.Printf("Part 2: %d\n", <-res2)
 }
