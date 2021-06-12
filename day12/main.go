@@ -1,3 +1,7 @@
+//This Code is not functional.
+//I have difficulty traversing JSON with Golang.
+//See my result in main.js useing NodeJS to load local file.
+
 package main
 
 import (
