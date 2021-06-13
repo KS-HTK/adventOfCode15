@@ -114,7 +114,7 @@ func main() {
 	}()
 	wg.Wait()
 	dataMap2["me"] = make(map[string]int)
-	for k, _ := range dataMap {
+	for k := range dataMap {
 		dataMap2[k]["me"] = 0
 		dataMap2["me"][k] = 0
 	}
