@@ -72,7 +72,7 @@ func lesser(a int, b int) bool {
 	return a < b
 }
 
-//get Route between all points of 'todo' based on the distance as compared by 'fn'
+//get Route between all points of 'to do' based on the distance as compared by 'fn'
 func getRoute(todo []string, fn comp) (string, int) {
 	rtn := -1
 	lDest := ""
