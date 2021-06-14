@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 func errchk(e error) {
@@ -64,28 +63,16 @@ func main() {
 	dat, err := ioutil.ReadFile("input")
 	errchk(err)
 	lines := strings.Split(string(dat), "\n")
-	var containers, containers2 []int
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		containers = interpret(lines)
-		sort.Ints(containers)
-		wg.Done()
-	}()
-	go func() {
-		containers2 = interpret(lines)
-		sort.Ints(containers2)
-		wg.Done()
-	}()
-	wg.Wait()
-	fmt.Println(containers)
+	var containers []int
+	containers = interpret(lines)
+	sort.Ints(containers)
 
 	eggnog := 150
 	res1, res2 := make(chan int), make(chan int)
 	go func() {
 		res := make(chan []int)
 		go logRes(res, res1, res2)
-		findComb(0, 0, eggnog, make([]int, 0), containers2, res)
+		findComb(0, 0, eggnog, make([]int, 0), containers, res)
 		close(res)
 	}()
 
