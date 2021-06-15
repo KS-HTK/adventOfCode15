@@ -117,8 +117,8 @@ func worker(jobs <-chan job, addJob chan<- job, t map[string][]string) {
 
 //function for initalizing indexer and worker and overseeing their work
 func makeMed(med string, t map[string][]string, res chan int) {
-	jobsForIndexer := make(chan job, 1000000)
-	jobsForWorkers := make(chan job, 1000000)
+	jobsForIndexer := make(chan job, 10000000)
+	jobsForWorkers := make(chan job, 10000000)
 	go func() {
 		res <- indexer(jobsForIndexer, jobsForWorkers, med)
 	}()
@@ -141,8 +141,11 @@ func main() {
 	errchk(err)
 	lines := strings.Split(string(dat), "\n")
 	var med string
-	strChannel := make(chan string, 1)
-	transitions := interpret(lines, strChannel)
+	strChannel := make(chan string)
+	transitions := make(map[string][]string)
+	go func() {
+		transitions = interpret(lines, strChannel)
+	}()
 	med = <-strChannel
 	res1, res2 := make(chan int), make(chan int)
 	go func() {
