@@ -37,6 +37,7 @@ type traceNode struct {
 }
 
 var cheapest_winner player
+var cheapest_hm_winner player
 
 func magicMissile(player *player, boss *boss) error {
 	const cost = 53
@@ -67,13 +68,13 @@ func shield(p *player) (int, error) {
 	}
 	p.mana -= cost
 	p.spent_mana += cost
-	p.def += 7
+	p.def = 7
 	//update spell (remove shield if timer runs out)
 	return duration, nil
 }
 func updateShield(time int, p *player) {
 	if time == 0 {
-		p.def -= 7
+		p.def = 0
 	}
 }
 func poison(p *player, b *boss) (int, error) {
@@ -132,9 +133,18 @@ func play(
 	player player,
 	boss boss,
 	spell_timers [3]int,
-	nextSpell int, res chan<- player) {
+	nextSpell int,
+	hardMode bool,
+	res chan<- player) {
 	addTracePoint(&player, boss, spell_timers, nextSpell)
 	//player turn:
+	//if hard mode deal 1 dmg to player (check if dead)
+	if hardMode {
+		player.hp -= 1
+		if player.hp <= 0 {
+			return
+		}
+	}
 	//activate all effects that are timer based
 	updateEffects(&spell_timers, &player, &boss)
 	//check incase a spell killed the boss.
@@ -152,21 +162,31 @@ func play(
 	switch nextSpell {
 	case 0:
 		err := magicMissile(&player, &boss)
-		errchk(err)
+		if err != nil {
+			return
+		}
 	case 1:
 		err := drain(&player, &boss)
-		errchk(err)
+		if err != nil {
+			return
+		}
 	case 2:
 		duration, err := shield(&player)
-		errchk(err)
+		if err != nil || spell_timers[0] > 0 {
+			return
+		}
 		spell_timers[0] = duration
 	case 3:
 		duration, err := poison(&player, &boss)
-		errchk(err)
+		if err != nil || spell_timers[1] > 0 {
+			return
+		}
 		spell_timers[1] = duration
 	case 4:
 		duration, err := recharge(&player)
-		errchk(err)
+		if err != nil || spell_timers[2] > 0 {
+			return
+		}
 		spell_timers[2] = duration
 	default:
 		errchk(errors.New("No Spell Cast: " + fmt.Sprint(nextSpell)))
@@ -195,61 +215,72 @@ func play(
 	if player.spent_mana > cheapest_winner.spent_mana {
 		return
 	}
-
-	if player.mana >= 53 {
-		play(player, boss, spell_timers, 0, res)
-	} else {
-		//if player cant cast cheapest spell it is GAME OVER for the player
-		return
+	var wg sync.WaitGroup
+	//determining possible spells here is not as trivial as was implemented before
+	//recharge can provide mana for use.
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func(s int) {
+			play(player, boss, spell_timers, s, hardMode, res)
+			wg.Done()
+		}(i)
 	}
-	if player.mana >= 73 {
-		play(player, boss, spell_timers, 1, res)
-	}
-	if player.mana >= 113 && spell_timers[0] <= 1 {
-		play(player, boss, spell_timers, 2, res)
-	}
-	if player.mana >= 173 && spell_timers[1] <= 1 {
-		play(player, boss, spell_timers, 3, res)
-	}
-	if player.mana >= 229 && spell_timers[2] <= 1 {
-		play(player, boss, spell_timers, 4, res)
-	}
+	wg.Wait()
 }
 
-func playAll(p player, b boss, res1 chan<- int) {
-	cheapest_winner = player{spent_mana: 6000}
+func playAll(p player, b boss, res1 chan<- int, res2 chan<- int) {
+	cheapest_winner = player{spent_mana: 12000}
 	res := make(chan player, 2000)
+	cheapest_hm_winner = player{spent_mana: 12000}
+	res_hm := make(chan player, 2000)
 	go func() {
 		for pl := range res {
 			if pl.hp > 0 && pl.spent_mana < cheapest_winner.spent_mana {
 				cheapest_winner = pl
 			}
 		}
-		printPlayer(&cheapest_winner)
 		res1 <- cheapest_winner.spent_mana
 	}()
+	go func() {
+		for pl := range res_hm {
+			if pl.hp > 0 && pl.spent_mana < cheapest_winner.spent_mana {
+				cheapest_hm_winner = pl
+			}
+		}
+		printGameTrace(&cheapest_hm_winner)
+		res2 <- cheapest_hm_winner.spent_mana
+	}()
 	var wg sync.WaitGroup
+	var wg2 sync.WaitGroup
 	for spell := 0; spell < 5; spell++ {
-		tmp := spell
 		wg.Add(1)
-		go func() {
-			play(p, b, [3]int{-1, -1, -1}, tmp, res)
+		go func(s int) {
+			play(player{hp: p.hp, def: p.def, mana: p.mana}, boss{hp: b.hp, dmg: b.dmg}, [3]int{-1, -1, -1}, s, false, res)
 			wg.Done()
-		}()
+		}(spell)
+		wg2.Add(1)
+		go func(s int) {
+			play(p, b, [3]int{-1, -1, -1}, s, true, res_hm)
+			wg2.Done()
+		}(spell)
 	}
+	go func() {
+		wg2.Wait()
+		close(res_hm)
+	}()
 	wg.Wait()
 	close(res)
 }
 
 //print out a player Struct
-func printPlayer(p *player) {
+func printGameTrace(p *player) {
 	readableSpell := [5]string{"Magic Missile", "Drain", "Shield", "Poison", "Recharge"}
-	readableEffect := [3]string{"armor", "poison", "recharge"}
+	readableEffect := [3]string{"Shield", "Poison", "Recharge"}
 	for i, t := range p.trace {
-		active := [3]string{"", "", ""}
+		active := ""
 		for i, v := range t.spell_timers {
 			if v > 0 {
-				active[i] = readableEffect[i]
+				active += readableEffect[i] + ": " + strconv.Itoa(v) + ", "
 			}
 		}
 		turn := ""
@@ -291,8 +322,7 @@ func main() {
 
 	res1, res2 := make(chan int), make(chan int)
 	go func() {
-		playAll(p, b, res1)
-		res2 <- -1
+		playAll(p, b, res1, res2)
 	}()
 	//Tested results: 1362 (to high)
 	fmt.Printf("Part 1: %d\n", <-res1)
