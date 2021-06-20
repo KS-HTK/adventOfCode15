@@ -30,10 +30,10 @@ type boss struct {
 }
 
 type traceNode struct {
-	player        player
-	boss          boss
-	active_spells [3]func() bool
-	nextSpell     int
+	player       player
+	boss         boss
+	spell_timers [3]int
+	nextSpell    int
 }
 
 var cheapest_winner player
@@ -59,84 +59,71 @@ func drain(player *player, boss *boss) error {
 	player.hp += 2
 	return nil
 }
-func shield(player *player) (func() bool, error) {
+func shield(p *player) (int, error) {
 	const cost = 113
-	if player.mana < cost {
-		return nil, errors.New("Not enough Mana")
+	const duration = 6
+	if p.mana < cost {
+		return -1, errors.New("Not enough Mana")
 	}
-	player.mana -= cost
-	player.spent_mana += cost
-	timer := 6
-	player.def += 7
-	//report true if spell runs out
-	return func() bool {
-		if timer > 0 {
-			timer--
-			if timer == 0 {
-				player.def -= 7
-				return true
-			}
-			return false
-		}
-		return true
-	}, nil
+	p.mana -= cost
+	p.spent_mana += cost
+	p.def += 7
+	//update spell (remove shield if timer runs out)
+	return duration, nil
 }
-func poison(player *player, boss *boss) (func() bool, error) {
+func updateShield(time int, p *player) {
+	if time == 0 {
+		p.def -= 7
+	}
+}
+func poison(p *player, b *boss) (int, error) {
 	const cost = 173
-	if player.mana < cost {
-		return nil, errors.New("Not enough Mana")
+	const duration = 6
+	if p.mana < cost {
+		return -1, errors.New("Not enough Mana")
 	}
-	player.mana -= cost
-	player.spent_mana += cost
-	timer := 6
+	p.mana -= cost
+	p.spent_mana += cost
 	//report true if spell runs out
-	return func() bool {
-		if timer > 0 {
-			boss.hp -= 3
-			timer--
-		}
-		if timer > 0 {
-			return false
-		}
-		return true
-	}, nil
+	return duration, nil
 }
-func recharge(player *player) (func() bool, error) {
-	const cost = 229
-	if player.mana < cost {
-		return nil, errors.New("Not enough Mana")
+func updatePoison(time int, b *boss) {
+	if time > 0 {
+		b.hp -= 3
 	}
-	player.mana -= cost
-	player.spent_mana += cost
-	timer := 5
+}
+func recharge(p *player) (int, error) {
+	const cost = 229
+	const duration = 5
+	if p.mana < cost {
+		return -1, errors.New("Not enough Mana")
+	}
+	p.mana -= cost
+	p.spent_mana += cost
 	//report true if spell runs out
-	return func() bool {
-		if timer > 0 {
-			player.mana += 101
-			timer--
-		}
-		if timer > 0 {
-			return false
-		}
-		return true
-	}, nil
+	return duration, nil
+}
+func updateRecharge(time int, p *player) {
+	if time > 0 {
+		p.mana += 101
+	}
 }
 
 //update spells function:
-func updateEffects(spells *[3]func() bool) {
-	for i, f := range spells {
-		if f != nil {
-			b := f()
-			if b {
-				spells[i] = nil
-			}
-		}
-	}
+func updateEffects(spells *[3]int, p *player, b *boss) {
+	//spell timers may go negative. No match should last long enough for a int underflow
+	//letting timers go negative prevents double trigger of shield removal, etc.
+	updateShield(spells[0], p)
+	spells[0] -= 1
+	updatePoison(spells[1], b)
+	spells[1] -= 1
+	updateRecharge(spells[2], p)
+	spells[2] -= 1
 }
 
 //addTrace to player for inspecting a game:
-func addTracePoint(p *player, b boss, act_spl [3]func() bool, nxtSpl int) {
-	p.trace = append(p.trace, traceNode{player: *p, boss: b, active_spells: act_spl, nextSpell: nxtSpl})
+func addTracePoint(p *player, b boss, spl_time [3]int, nxtSpl int) {
+	p.trace = append(p.trace, traceNode{player: *p, boss: b, spell_timers: spl_time, nextSpell: nxtSpl})
 }
 
 //game function
@@ -144,12 +131,12 @@ func addTracePoint(p *player, b boss, act_spl [3]func() bool, nxtSpl int) {
 func play(
 	player player,
 	boss boss,
-	active_spells [3]func() bool,
+	spell_timers [3]int,
 	nextSpell int, res chan<- player) {
-	addTracePoint(&player, boss, active_spells, nextSpell)
+	addTracePoint(&player, boss, spell_timers, nextSpell)
 	//player turn:
 	//activate all effects that are timer based
-	updateEffects(&active_spells)
+	updateEffects(&spell_timers, &player, &boss)
 	//check incase a spell killed the boss.
 	if boss.hp <= 0 {
 		res <- player
@@ -159,9 +146,9 @@ func play(
 	//player casts spell
 	//0 = Magic Missile
 	//1 = Drain
-	//2 = Shield   = ac…_sp…0
-	//3 = Poison   = ac…_sp…1
-	//4 = Recharge = ac…_sp…2
+	//2 = Shield
+	//3 = Poison
+	//4 = Recharge
 	switch nextSpell {
 	case 0:
 		err := magicMissile(&player, &boss)
@@ -170,25 +157,25 @@ func play(
 		err := drain(&player, &boss)
 		errchk(err)
 	case 2:
-		effect, err := shield(&player)
+		duration, err := shield(&player)
 		errchk(err)
-		active_spells[0] = effect
+		spell_timers[0] = duration
 	case 3:
-		effect, err := poison(&player, &boss)
+		duration, err := poison(&player, &boss)
 		errchk(err)
-		active_spells[1] = effect
+		spell_timers[1] = duration
 	case 4:
-		effect, err := recharge(&player)
+		duration, err := recharge(&player)
 		errchk(err)
-		active_spells[2] = effect
+		spell_timers[2] = duration
 	default:
 		errchk(errors.New("No Spell Cast: " + fmt.Sprint(nextSpell)))
 	}
 
-	addTracePoint(&player, boss, active_spells, nextSpell)
+	addTracePoint(&player, boss, spell_timers, nextSpell)
 	//boss turn:
 	//activate all effects that are timer based
-	updateEffects(&active_spells)
+	updateEffects(&spell_timers, &player, &boss)
 	//check incase a spell killed the boss.
 	if boss.hp <= 0 {
 		res <- player
@@ -209,23 +196,23 @@ func play(
 		return
 	}
 
-	if player.mana > 53 {
-		play(player, boss, active_spells, 0, res)
+	if player.mana >= 53 {
+		play(player, boss, spell_timers, 0, res)
 	} else {
 		//if player cant cast cheapest spell it is GAME OVER for the player
 		return
 	}
-	if player.mana > 73 {
-		play(player, boss, active_spells, 1, res)
+	if player.mana >= 73 {
+		play(player, boss, spell_timers, 1, res)
 	}
-	if player.mana > 113 && active_spells[0] == nil {
-		play(player, boss, active_spells, 2, res)
+	if player.mana >= 113 && spell_timers[0] <= 1 {
+		play(player, boss, spell_timers, 2, res)
 	}
-	if player.mana > 173 && active_spells[1] == nil {
-		play(player, boss, active_spells, 3, res)
+	if player.mana >= 173 && spell_timers[1] <= 1 {
+		play(player, boss, spell_timers, 3, res)
 	}
-	if player.mana > 229 && active_spells[2] == nil {
-		play(player, boss, active_spells, 4, res)
+	if player.mana >= 229 && spell_timers[2] <= 1 {
+		play(player, boss, spell_timers, 4, res)
 	}
 }
 
@@ -238,7 +225,7 @@ func playAll(p player, b boss, res1 chan<- int) {
 				cheapest_winner = pl
 			}
 		}
-		//printPlayer(&cheapest_winner)
+		printPlayer(&cheapest_winner)
 		res1 <- cheapest_winner.spent_mana
 	}()
 	var wg sync.WaitGroup
@@ -246,7 +233,7 @@ func playAll(p player, b boss, res1 chan<- int) {
 		tmp := spell
 		wg.Add(1)
 		go func() {
-			play(p, b, [3]func() bool{nil, nil, nil}, tmp, res)
+			play(p, b, [3]int{-1, -1, -1}, tmp, res)
 			wg.Done()
 		}()
 	}
@@ -256,25 +243,36 @@ func playAll(p player, b boss, res1 chan<- int) {
 
 //print out a player Struct
 func printPlayer(p *player) {
-	readableSpell := [3]string{"armor", "poison", "recharge"}
+	readableSpell := [5]string{"Magic Missile", "Drain", "Shield", "Poison", "Recharge"}
+	readableEffect := [3]string{"armor", "poison", "recharge"}
 	for i, t := range p.trace {
 		active := [3]string{"", "", ""}
-		for i, v := range t.active_spells {
-			if v != nil {
-				active[i] = readableSpell[i]
+		for i, v := range t.spell_timers {
+			if v > 0 {
+				active[i] = readableEffect[i]
 			}
 		}
-		fmt.Println("Round:", i/2,
-			"Player: ",
-			"hp:", t.player.hp,
-			"mana:", t.player.mana,
-			"Boss hp:", t.boss.hp,
-			"next spell:", t.nextSpell,
-			"active spells:", active)
+		turn := ""
+		action := ""
+		if i%2 == 0 {
+			turn = "Player"
+			action = "\nPlayer casts " + readableSpell[t.nextSpell] + "."
+		} else {
+			turn = "Boss"
+			action = "\nBoss attacks for " +
+				strconv.Itoa(t.boss.dmg) + " - " +
+				strconv.Itoa(t.player.def) + " = " +
+				strconv.Itoa(t.boss.dmg-t.player.def) + " damage!"
+		}
+		fmt.Println("\n--", turn, "turn --",
+			"\n- Player has", t.player.hp, "hit point,",
+			t.player.def, "armor",
+			t.player.mana, "mana",
+			"\n- Boss has", t.boss.hp, "hit points",
+			"\nactive spells:", active,
+			action)
 	}
-	fmt.Println("hp: ", p.hp)
-	fmt.Println("mana: ", p.mana)
-	fmt.Println("spent mana: ", p.spent_mana)
+	fmt.Println("The Player has Spent", p.spent_mana, "mana during this game.")
 }
 
 //main function.
@@ -287,13 +285,16 @@ func main() {
 	dmg, err := strconv.Atoi(strings.Split(lines[1], ": ")[1])
 	errchk(err)
 	b := boss{hp: hp, dmg: dmg}
-	p := player{hp: 50, def: 0, mana: 500}
+	//player starting values:
+	p := player{hp: 50, def: 0, mana: 500} //for input (actual task)
+	//p := player{hp: 10, def: 0, mana: 250} //for testinput (example)
 
 	res1, res2 := make(chan int), make(chan int)
 	go func() {
 		playAll(p, b, res1)
 		res2 <- -1
 	}()
+	//Tested results: 1362 (to high)
 	fmt.Printf("Part 1: %d\n", <-res1)
 	fmt.Printf("Part 2: %d\n", <-res2)
 }
