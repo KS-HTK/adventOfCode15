@@ -39,6 +39,25 @@ type traceNode struct {
 var cheapest_winner player
 var cheapest_hm_winner player
 
+func getCurrentCheapestGame(hardMode bool) int {
+	if hardMode {
+		return cheapest_hm_winner.spent_mana
+	}
+	return cheapest_winner.spent_mana
+}
+func setCheapestWinner(hardMode bool, p player) {
+	if hardMode {
+		cheapest_hm_winner = p
+	}
+	cheapest_winner = p
+}
+func getCheapestWinner(hardMode bool) *player {
+	if hardMode {
+		return &cheapest_hm_winner
+	}
+	return &cheapest_winner
+}
+
 func magicMissile(player *player, boss *boss) error {
 	const cost = 53
 	if player.mana < cost {
@@ -72,11 +91,6 @@ func shield(p *player) (int, error) {
 	//update spell (remove shield if timer runs out)
 	return duration, nil
 }
-func updateShield(time int, p *player) {
-	if time == 0 {
-		p.def = 0
-	}
-}
 func poison(p *player, b *boss) (int, error) {
 	const cost = 173
 	const duration = 6
@@ -87,11 +101,6 @@ func poison(p *player, b *boss) (int, error) {
 	p.spent_mana += cost
 	//report true if spell runs out
 	return duration, nil
-}
-func updatePoison(time int, b *boss) {
-	if time > 0 {
-		b.hp -= 3
-	}
 }
 func recharge(p *player) (int, error) {
 	const cost = 229
@@ -104,7 +113,17 @@ func recharge(p *player) (int, error) {
 	//report true if spell runs out
 	return duration, nil
 }
-func updateRecharge(time int, p *player) {
+func shieldEffect(time int, p *player) {
+	if time == 0 {
+		p.def = 0
+	}
+}
+func poisonEffect(time int, b *boss) {
+	if time > 0 {
+		b.hp -= 3
+	}
+}
+func rechargeEffect(time int, p *player) {
 	if time > 0 {
 		p.mana += 101
 	}
@@ -114,11 +133,11 @@ func updateRecharge(time int, p *player) {
 func updateEffects(spells *[3]int, p *player, b *boss) {
 	//spell timers may go negative. No match should last long enough for a int underflow
 	//letting timers go negative prevents double trigger of shield removal, etc.
-	updateShield(spells[0], p)
+	shieldEffect(spells[0], p)
 	spells[0] -= 1
-	updatePoison(spells[1], b)
+	poisonEffect(spells[1], b)
 	spells[1] -= 1
-	updateRecharge(spells[2], p)
+	rechargeEffect(spells[2], p)
 	spells[2] -= 1
 }
 
@@ -136,9 +155,10 @@ func play(
 	nextSpell int,
 	hardMode bool,
 	res chan<- player) {
+
 	addTracePoint(&player, boss, spell_timers, nextSpell)
 	//player turn:
-	//if hard mode deal 1 dmg to player (check if dead)
+	//if hardMode is enabled deal 1 dmg to player and check if dead
 	if hardMode {
 		player.hp -= 1
 		if player.hp <= 0 {
@@ -207,69 +227,40 @@ func play(
 	}
 	player.hp -= dmg
 	if player.hp <= 0 {
-		//res <- player
 		return
 	}
 	//if no one wins play next round:
-	//optimization: if spent mana runs over current cheapest_win exit
-	if player.spent_mana > cheapest_winner.spent_mana {
+	//optimization: if spent mana runs over current cheapest game exit
+	if player.spent_mana > getCurrentCheapestGame(hardMode) {
 		return
 	}
-	var wg sync.WaitGroup
-	//determining possible spells here is not as trivial as was implemented before
-	//recharge can provide mana for use.
 	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func(s int) {
-			play(player, boss, spell_timers, s, hardMode, res)
-			wg.Done()
-		}(i)
+		play(player, boss, spell_timers, i, hardMode, res)
 	}
-	wg.Wait()
 }
 
-func playAll(p player, b boss, res1 chan<- int, res2 chan<- int) {
-	cheapest_winner = player{spent_mana: 12000}
-	res := make(chan player, 2000)
-	cheapest_hm_winner = player{spent_mana: 12000}
-	res_hm := make(chan player, 2000)
+func playAll(p player, b boss, hardMode bool, res chan<- int) {
+	setCheapestWinner(hardMode, player{spent_mana: 12000})
+	winners := make(chan player, 100)
 	go func() {
-		for pl := range res {
-			if pl.hp > 0 && pl.spent_mana < cheapest_winner.spent_mana {
-				cheapest_winner = pl
+		for winner := range winners {
+			if winner.hp > 0 && winner.spent_mana < getCurrentCheapestGame(hardMode) {
+				setCheapestWinner(hardMode, winner)
 			}
 		}
-		res1 <- cheapest_winner.spent_mana
-	}()
-	go func() {
-		for pl := range res_hm {
-			if pl.hp > 0 && pl.spent_mana < cheapest_winner.spent_mana {
-				cheapest_hm_winner = pl
-			}
-		}
-		printGameTrace(&cheapest_hm_winner)
-		res2 <- cheapest_hm_winner.spent_mana
+		//printGameTrace(getCheapestWinner(hardMode))
+		res <- getCurrentCheapestGame(hardMode)
 	}()
 	var wg sync.WaitGroup
-	var wg2 sync.WaitGroup
 	for spell := 0; spell < 5; spell++ {
 		wg.Add(1)
 		go func(s int) {
-			play(player{hp: p.hp, def: p.def, mana: p.mana}, boss{hp: b.hp, dmg: b.dmg}, [3]int{-1, -1, -1}, s, false, res)
+			play(p, b, [3]int{-1, -1, -1}, s, hardMode, winners)
 			wg.Done()
 		}(spell)
-		wg2.Add(1)
-		go func(s int) {
-			play(p, b, [3]int{-1, -1, -1}, s, true, res_hm)
-			wg2.Done()
-		}(spell)
 	}
-	go func() {
-		wg2.Wait()
-		close(res_hm)
-	}()
 	wg.Wait()
-	close(res)
+	close(winners)
 }
 
 //print out a player Struct
@@ -321,9 +312,8 @@ func main() {
 	//p := player{hp: 10, def: 0, mana: 250} //for testinput (example)
 
 	res1, res2 := make(chan int), make(chan int)
-	go func() {
-		playAll(p, b, res1, res2)
-	}()
+	go playAll(p, b, false, res1)
+	go playAll(p, b, true, res2)
 	//Tested results: 1362 (to high)
 	fmt.Printf("Part 1: %d\n", <-res1)
 	fmt.Printf("Part 2: %d\n", <-res2)
